@@ -127,10 +127,35 @@ static esp_err_t init_ssd1306_command(i2c_port_t i2c_num)
     i2c_master_start(cmd);
         I2C_MASTER_WRITE_BYTE(cmd, (OLED_I2C_ADDRESS << 1) | I2C_MASTER_WRITE, true);
         I2C_MASTER_WRITE_BYTE(cmd, OLED_CONTROL_BYTE_CMD_STREAM, true);
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_DISPLAY_OFF, true);
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_MUX_RATIO, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x1F, true);  // 32 rows = 0x1F
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_DISPLAY_OFFSET, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x00, true);
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_DISPLAY_START_LINE | 0x00, true);
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_COM_PIN_MAP, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x02, true);  // COM pin config for 32px
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_MEMORY_ADDR_MODE, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x00, true); // Horizontal addressing mode
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_COLUMN_RANGE, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x00, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x7F, true);
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_PAGE_RANGE, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x00, true);
+        I2C_MASTER_WRITE_BYTE(cmd, 0x03, true); // 4 pages for 32px
+
         I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_CHARGE_PUMP, true);
         I2C_MASTER_WRITE_BYTE(cmd, 0x14, true);
-        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_SEGMENT_REMAP, true); // reverse left-right mapping
-        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_COM_SCAN_MODE, true); // reverse up-bottom mapping
+
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_SEGMENT_REMAP, true);
+        I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_SET_COM_SCAN_MODE, true);
         I2C_MASTER_WRITE_BYTE(cmd, OLED_CMD_DISPLAY_ON, true);
     i2c_master_stop(cmd);
     esp_err_t err = i2c_master_cmd_begin(i2c_num, cmd, MASTER_COMMAND_TIMEOUT_MS);
@@ -286,7 +311,7 @@ static term nif_ssd1306_clear(Context *ctx, int argc, term argv[])
 
     uint8_t zero[128];
     memset(zero, 0, sizeof zero);
-    for (uint8_t i = 0; i < 8; i++) {
+    for (uint8_t i = 0; i < 4; i++) {  // Only 4 pages on 128x32
         esp_err_t err = write_page_command(i2c_num, zero, i);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Failed to clear page %i.  Error: %i", i, err);
@@ -482,7 +507,7 @@ static term nif_ssd1306_set_bitmap(Context *ctx, int argc, term argv[])
     }
 
     size_t bit = 0;
-    for (uint8_t pagenum = 0; pagenum < 8;  ++pagenum) {
+    for (uint8_t pagenum = 0; pagenum < 4; ++pagenum) {  // Only 4 pages
         write_bitmap_page(i2c_num, &bit, pagenum, bitmap, width, height);
     }
     return OK_ATOM;
