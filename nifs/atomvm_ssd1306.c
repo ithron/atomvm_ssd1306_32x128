@@ -410,6 +410,70 @@ static esp_err_t write_text_command(i2c_port_t i2c_num, const char *text, uint8_
     return ESP_OK;
 }
 
+/**
+ * Like write_text_command, but start at (char_x * 8, page), and on newline
+ * wrap back to the same char_x offset.
+ */
+static esp_err_t write_text_command_xy(i2c_port_t i2c_num,
+                                       uint8_t char_x,
+                                       uint8_t start_page,
+                                       const char *text,
+                                       uint8_t text_len)
+{
+    uint8_t cur_page = start_page;
+    esp_err_t err;
+    uint8_t start_col = (uint8_t)(char_x * 8);
+
+    // set initial page & column
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+      I2C_MASTER_WRITE_BYTE(cmd, (OLED_I2C_ADDRESS<<1)|I2C_MASTER_WRITE, true);
+      I2C_MASTER_WRITE_BYTE(cmd, OLED_CONTROL_BYTE_CMD_STREAM, true);
+      I2C_MASTER_WRITE_BYTE(cmd, start_col & 0x0F, true);
+      I2C_MASTER_WRITE_BYTE(cmd, 0x10 | ((start_col>>4)&0x0F), true);
+      I2C_MASTER_WRITE_BYTE(cmd, 0xB0 | (cur_page & 0x0F), true);
+    i2c_master_stop(cmd);
+    err = i2c_master_cmd_begin(i2c_num, cmd, MASTER_COMMAND_TIMEOUT_MS);
+    i2c_cmd_link_delete(cmd);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    // stream each glyph, wrapping on newline
+    for (uint8_t i = 0; i < text_len; i++) {
+        if (text[i] == '\n') {
+            cur_page++;
+            // set new line position
+            cmd = i2c_cmd_link_create();
+            i2c_master_start(cmd);
+              I2C_MASTER_WRITE_BYTE(cmd, (OLED_I2C_ADDRESS<<1)|I2C_MASTER_WRITE, true);
+              I2C_MASTER_WRITE_BYTE(cmd, OLED_CONTROL_BYTE_CMD_STREAM, true);
+              I2C_MASTER_WRITE_BYTE(cmd, start_col & 0x0F, true);
+              I2C_MASTER_WRITE_BYTE(cmd, 0x10 | ((start_col>>4)&0x0F), true);
+              I2C_MASTER_WRITE_BYTE(cmd, 0xB0 | (cur_page & 0x0F), true);
+            i2c_master_stop(cmd);
+            err = i2c_master_cmd_begin(i2c_num, cmd, MASTER_COMMAND_TIMEOUT_MS);
+            i2c_cmd_link_delete(cmd);
+            if (err != ESP_OK) {
+                return err;
+            }
+        } else {
+            cmd = i2c_cmd_link_create();
+            i2c_master_start(cmd);
+              I2C_MASTER_WRITE_BYTE(cmd, (OLED_I2C_ADDRESS<<1)|I2C_MASTER_WRITE, true);
+              I2C_MASTER_WRITE_BYTE(cmd, OLED_CONTROL_BYTE_DATA_STREAM, true);
+              I2C_MASTER_WRITE(cmd, font8x8_basic_tr[(uint8_t)text[i]], 8, true);
+            i2c_master_stop(cmd);
+            err = i2c_master_cmd_begin(i2c_num, cmd, MASTER_COMMAND_TIMEOUT_MS);
+            i2c_cmd_link_delete(cmd);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+    }
+    return ESP_OK;
+}
+
 static term nif_ssd1306_set_text(Context *ctx, int argc, term argv[])
 {
     TRACE(TAG ": nif_ssd1306_set_text\n");
@@ -440,6 +504,52 @@ static term nif_ssd1306_set_text(Context *ctx, int argc, term argv[])
 
     return OK_ATOM;
 }
+
+/**
+ * NIF wrapper for set_text_xy/4
+ */
+static term nif_ssd1306_set_text_xy(Context *ctx, int argc, term argv[])
+{
+    TRACE(TAG ": nif_ssd1306_set_text_xy\n");
+    UNUSED(argc);
+
+    term i2c_num_term = argv[0];
+    term charx_term    = argv[1];
+    term paget_term    = argv[2];
+    term text_term     = argv[3];
+
+    VALIDATE_VALUE(i2c_num_term, term_is_atom);
+    VALIDATE_VALUE(charx_term,    term_is_integer);
+    VALIDATE_VALUE(paget_term,    term_is_integer);
+    VALIDATE_VALUE(text_term,     term_is_binary);
+
+    i2c_port_t i2c_num = get_i2c_port_num(ctx->global, i2c_num_term);
+    if (i2c_num == I2C_NUM_MAX) {
+            ESP_LOGE(TAG, "Invalid I2C portnum");
+            RAISE_ERROR(BADARG_ATOM);
+        }
+
+    avm_int_t char_x = term_to_int(charx_term);
+    avm_int_t page   = term_to_int(paget_term);
+    const char *text = term_binary_data(text_term);
+    uint8_t text_len = term_binary_size(text_term);
+
+    if (reset_display_command(i2c_num) != ESP_OK) {
+            RAISE_ERROR(ERROR_ATOM);
+        }
+
+    esp_err_t err = write_text_command_xy(i2c_num,
+                                          (uint8_t)char_x,
+                                          (uint8_t)page,
+                                          text,
+                                          text_len);
+    if (err != ESP_OK) {
+            RAISE_ERROR(ERROR_ATOM);
+        }
+
+    return OK_ATOM;
+}
+
 
 static inline void set_page_pixel(uint8_t *page, unsigned x, unsigned y)
 {
@@ -597,6 +707,11 @@ static const struct Nif ssd1306_set_text_nif =
     .base.type = NIFFunctionType,
     .nif_ptr = nif_ssd1306_set_text
 };
+static const struct Nif ssd1306_set_text_xy_nif =
+{
+    .base.type = NIFFunctionType,
+    .nif_ptr = nif_ssd1306_set_text_xy
+};
 static const struct Nif ssd1306_set_qrcode_nif =
 {
     .base.type = NIFFunctionType,
@@ -634,6 +749,10 @@ const struct Nif *atomvm_ssd1306_get_nif(const char *nifname)
     if (strcmp("ssd1306:nif_set_text/2", nifname) == 0) {
         TRACE("Resolved platform nif %s ...\n", nifname);
         return &ssd1306_set_text_nif;
+    }
+    if (strcmp("ssd1306:nif_set_text/4", nifname) == 0) {
+       TRACE("Resolved platform nif %s ...\n", nifname);
+       return &ssd1306_set_text_xy_nif;
     }
     if (strcmp("ssd1306:nif_set_bitmap/4", nifname) == 0) {
         TRACE("Resolved platform nif %s ...\n", nifname);

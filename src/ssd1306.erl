@@ -27,9 +27,11 @@
 
 -behaviour(gen_server).
 
--export([start/1, stop/1, clear/1, set_inversion/2, set_contrast/2, set_text/2, set_bitmap/4, set_qrcode/2]).
+-export([start/1, stop/1, clear/1, set_inversion/2, set_contrast/2,
+    set_text/2, set_text/4, set_bitmap/4, set_qrcode/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([nif_init/1, nif_clear/1, nif_set_contrast/2, nif_set_text/2, nif_set_bitmap/4, nif_set_qrcode/2]).
+-export([nif_init/1, nif_clear/1, nif_set_contrast/2, nif_set_text/2,
+    nif_set_text/4, nif_set_bitmap/4, nif_set_qrcode/2]).
 
 -type freq_hz() :: non_neg_integer().
 -type ssd1306() :: pid().
@@ -130,6 +132,13 @@ set_contrast(SSD1306, Contrast) when is_integer(Contrast), 0 =< Contrast, Contra
 set_text(SSD1306, Text) ->
     gen_server:call(SSD1306, {set_text, Text}).
 
+-spec set_text(SSD1306::ssd1306(),
+                   CharX::non_neg_integer(),
+                   Page::non_neg_integer(),
+                   Text::string()) -> ok | {error, term()}.
+set_text(SSD1306, CharX, Page, Text) ->
+    gen_server:call(SSD1306, {set_text, CharX, Page, Text}).
+
 %%-----------------------------------------------------------------------------
 %% @param       SSD1306 a reference to the SSD1306 instance created via start
 %% @returns     ok | {error, Reason}
@@ -203,6 +212,10 @@ handle_call({set_contrast, Contrast}, _From, #state{use_nif=true} = State) ->
     {reply, ?MODULE:nif_set_contrast(State#state.i2c_num, Contrast rem 256), State};
 handle_call({set_text, Text}, _From, #state{use_nif=true} = State) ->
     {reply, ?MODULE:nif_set_text(State#state.i2c_num, iolist_to_binary(Text)), State};
+handle_call({set_text, CharX, Page, Text}, _From, #state{use_nif=true} =
+    State) ->
+    {reply, ?MODULE:nif_set_text(State#state.i2c_num, CharX,
+        Page, iolist_to_binary(Text)), State};
 % handle_call({set_text, Text}, _From, State) ->
 %     {reply, do_set_text(State#state.i2c, State#state.font_table, Text), State};
 handle_call({set_bitmap, Bitmap, Width, Height}, _From, #state{use_nif=true} = State) ->
@@ -514,6 +527,10 @@ nif_set_contrast(_I2CNum, _Contrast) ->
 
 %% @hidden
 nif_set_text(_I2CNum, _Data) ->
+    throw(nif_error).
+
+%% @hidden
+nif_set_text(_I2CNum, _CharX, _Page, _Data) ->
     throw(nif_error).
 
 %% @hidden
